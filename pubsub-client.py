@@ -1,9 +1,12 @@
 import json
+import os
+import subprocess
 import sys
 
-from concurrent.futures import TimeoutError
-from google.cloud import pubsub_v1
+path_sub_python = r"/python-pubsub/samples/snippets"
+gcloud_project = os.getenv("PUBSUB_PROJECT_ID", "my-gcp-project")
 
+os.environ["PUBSUB_EMULATOR_HOST"] = "localhost:8085"
 
 def create_topics_and_subscriptions(project_id, json_config):
     try:
@@ -22,54 +25,43 @@ def create_topics_and_subscriptions(project_id, json_config):
 
 
 def create_topic(project_id, topic_id):
-    publisher = pubsub_v1.PublisherClient()
-    topic_path = publisher.topic_path(project_id, topic_id)
+    print(f'>> creating topic {topic_id}')
+    command = ["python3", os.path.join(
+        path_sub_python, "publisher.py"), project_id, "create", topic_id]
 
-    topic = publisher.create_topic(topic_path)
+    output, error = execute_command(command)
 
-    print("Topic created: {}".format(topic))
+    if error and b'ERROR' in error:
+        print(
+            f'<< error while creating topic [{topic_id}]: {error}')
+        exit()
+
+    print(f'<< topic {topic_id} created successfully')
 
 
 def create_subscription(project_id, topic_id, subscription_id):
-    subscriber = pubsub_v1.SubscriberClient()
-    topic_path = subscriber.topic_path(project_id, topic_id)
-    subscription_path = subscriber.subscription_path(project_id, subscription_id)
-    subscription = subscriber.create_subscription(subscription_path, topic_path)
+    print(f'>> creating subscription {subscription_id}')
 
-    print("Subscription created: {}".format(subscription))
+    command = ["python3", os.path.join(
+        path_sub_python, "subscriber.py"), gcloud_project, "create", topic_id, subscription_id]
 
+    output, error = execute_command(command)
+    if error and b'ERROR' in error:
+        print(
+            f'<< error while creating subscription [{subscription_id}]: {error}')
+        exit()
 
-def publish(project_id, topic_id, data):
-    publisher = pubsub_v1.PublisherClient()
-    topic_path = publisher.topic_path(project_id, topic_id)
+    print(f'<< subscription {subscription_id} created successfully')
 
-    future = publisher.publish(topic_path, data=data.encode("utf-8"))
-    print(future.result())
-
-
-def receive(project_id, subscription_id, timeout=None):
-    subscriber = pubsub_v1.SubscriberClient()
-    subscription_path = subscriber.subscription_path(project_id, subscription_id)
-
-    def callback(message):
-        print("Received message: {}".format(message))
-        message.ack()
-
-    streaming_pull_future = subscriber.subscribe(subscription_path, callback=callback)
-    print("Listening for messages on {}..\n".format(subscription_path))
-
-    try:
-        streaming_pull_future.result(timeout=timeout)
-    except TimeoutError:
-        streaming_pull_future.cancel()
+def execute_command(command):
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    output, error = process.communicate()
+    return output, error
 
 
 if __name__ == "__main__":
+    print(f'>> Start command arg {sys.argv[1]}')
     if sys.argv[1] == "create":
         create_topics_and_subscriptions(sys.argv[2], sys.argv[3])
-    elif sys.argv[1] == "publish":
-        publish(sys.argv[2], sys.argv[3], sys.argv[4])
-    elif sys.argv[1] == "receive":
-        receive(sys.argv[2], sys.argv[3])
     else:
         print("Unknown command {}".format(sys.argv[1]))
